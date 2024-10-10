@@ -95,6 +95,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
+  //blink before entering while loop
   HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
   HAL_Delay(500);
   HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
@@ -105,21 +106,26 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint16_t digitalVal = 0;
-  char buffer[20];
+  uint16_t analogVal = 0, digitalVal = 0;
+  char buffer[100];
+
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    //read both analog and digital values
     HAL_ADC_Start(&hadc1);
     HAL_ADC_PollForConversion(&hadc1, 20);
-    digitalVal = HAL_ADC_GetValue(&hadc1);
-    sprintf(buffer, "Digital val: %hu\r\n", digitalVal);
+    analogVal = HAL_ADC_GetValue(&hadc1);
+    digitalVal = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
+    sprintf(buffer, "Analog val: %hu\r\t\tDigital val: %hu\n", analogVal, digitalVal);
     HAL_Delay(100); 
+
+    //write on serial the values fetched
     if(HAL_UART_Transmit(&huart2, (uint8_t *) buffer, strlen(buffer), HAL_MAX_DELAY) == HAL_OK){
-      HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-      HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+      //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+      //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
     }
   }
   /* USER CODE END 3 */

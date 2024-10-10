@@ -2,6 +2,10 @@
 
 Repository for the microcontroller recruiting task of the Eagle team.
 
+## Board pinout
+
+For the board pinout, check this [link](https://os.mbed.com/platforms/ST-Nucleo-F411RE/)
+
 ## Linker file - syntax error
 
 Using the STM32CubeMX software it is possible to setup the linker file.<br/>
