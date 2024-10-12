@@ -1,4 +1,4 @@
-ARM GAS  /tmp/cctJL2Zx.s 			page 1
+ARM GAS  /tmp/ccjAV5Hr.s 			page 1
 
 
    1              		.cpu cortex-m4
@@ -58,7 +58,7 @@ ARM GAS  /tmp/cctJL2Zx.s 			page 1
   28:Core/Src/stm32f4xx_it.c **** /* USER CODE BEGIN TD */
   29:Core/Src/stm32f4xx_it.c **** 
   30:Core/Src/stm32f4xx_it.c **** /* USER CODE END TD */
-ARM GAS  /tmp/cctJL2Zx.s 			page 2
+ARM GAS  /tmp/ccjAV5Hr.s 			page 2
 
 
   31:Core/Src/stm32f4xx_it.c **** 
@@ -118,7 +118,7 @@ ARM GAS  /tmp/cctJL2Zx.s 			page 1
   77:Core/Src/stm32f4xx_it.c ****   }
   37              		.loc 1 77 3 view .LVU2
   75:Core/Src/stm32f4xx_it.c ****   {
-ARM GAS  /tmp/cctJL2Zx.s 			page 3
+ARM GAS  /tmp/ccjAV5Hr.s 			page 3
 
 
   38              		.loc 1 75 10 view .LVU3
@@ -178,7 +178,7 @@ ARM GAS  /tmp/cctJL2Zx.s 			page 1
   98:Core/Src/stm32f4xx_it.c ****   */
   99:Core/Src/stm32f4xx_it.c **** void MemManage_Handler(void)
  100:Core/Src/stm32f4xx_it.c **** {
-ARM GAS  /tmp/cctJL2Zx.s 			page 4
+ARM GAS  /tmp/ccjAV5Hr.s 			page 4
 
 
   75              		.loc 1 100 1 view -0
@@ -238,7 +238,7 @@ ARM GAS  /tmp/cctJL2Zx.s 			page 1
  119:Core/Src/stm32f4xx_it.c ****   {
  107              		.loc 1 119 9 view .LVU15
  108 0000 FEE7     		b	.L8
-ARM GAS  /tmp/cctJL2Zx.s 			page 5
+ARM GAS  /tmp/ccjAV5Hr.s 			page 5
 
 
  109              		.cfi_endproc
@@ -298,7 +298,7 @@ ARM GAS  /tmp/cctJL2Zx.s 			page 1
  144              		.loc 1 145 1 view -0
  145              		.cfi_startproc
  146              		@ args = 0, pretend = 0, frame = 0
-ARM GAS  /tmp/cctJL2Zx.s 			page 6
+ARM GAS  /tmp/ccjAV5Hr.s 			page 6
 
 
  147              		@ frame_needed = 0, uses_anonymous_args = 0
@@ -358,7 +358,7 @@ ARM GAS  /tmp/cctJL2Zx.s 			page 1
  169:Core/Src/stm32f4xx_it.c ****   */
  170:Core/Src/stm32f4xx_it.c **** void PendSV_Handler(void)
  171:Core/Src/stm32f4xx_it.c **** {
-ARM GAS  /tmp/cctJL2Zx.s 			page 7
+ARM GAS  /tmp/ccjAV5Hr.s 			page 7
 
 
  182              		.loc 1 171 1 view -0
@@ -414,32 +414,86 @@ ARM GAS  /tmp/cctJL2Zx.s 			page 1
  213 0006 08BD     		pop	{r3, pc}
  214              		.cfi_endproc
  215              	.LFE228:
- 217              		.text
- 218              	.Letext0:
- 219              		.file 2 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h"
-ARM GAS  /tmp/cctJL2Zx.s 			page 8
+ 217              		.section	.text.EXTI2_IRQHandler,"ax",%progbits
+ 218              		.align	1
+ 219              		.global	EXTI2_IRQHandler
+ 220              		.syntax unified
+ARM GAS  /tmp/ccjAV5Hr.s 			page 8
+
+
+ 221              		.thumb
+ 222              		.thumb_func
+ 224              	EXTI2_IRQHandler:
+ 225              	.LFB229:
+ 193:Core/Src/stm32f4xx_it.c **** 
+ 194:Core/Src/stm32f4xx_it.c **** /******************************************************************************/
+ 195:Core/Src/stm32f4xx_it.c **** /* STM32F4xx Peripheral Interrupt Handlers                                    */
+ 196:Core/Src/stm32f4xx_it.c **** /* Add here the Interrupt Handlers for the used peripherals.                  */
+ 197:Core/Src/stm32f4xx_it.c **** /* For the available peripheral interrupt handler names,                      */
+ 198:Core/Src/stm32f4xx_it.c **** /* please refer to the startup file (startup_stm32f4xx.s).                    */
+ 199:Core/Src/stm32f4xx_it.c **** /******************************************************************************/
+ 200:Core/Src/stm32f4xx_it.c **** 
+ 201:Core/Src/stm32f4xx_it.c **** /**
+ 202:Core/Src/stm32f4xx_it.c ****   * @brief This function handles EXTI line2 interrupt.
+ 203:Core/Src/stm32f4xx_it.c ****   */
+ 204:Core/Src/stm32f4xx_it.c **** void EXTI2_IRQHandler(void)
+ 205:Core/Src/stm32f4xx_it.c **** {
+ 226              		.loc 1 205 1 is_stmt 1 view -0
+ 227              		.cfi_startproc
+ 228              		@ args = 0, pretend = 0, frame = 0
+ 229              		@ frame_needed = 0, uses_anonymous_args = 0
+ 230 0000 08B5     		push	{r3, lr}
+ 231              		.cfi_def_cfa_offset 8
+ 232              		.cfi_offset 3, -8
+ 233              		.cfi_offset 14, -4
+ 206:Core/Src/stm32f4xx_it.c ****   /* USER CODE BEGIN EXTI2_IRQn 0 */
+ 207:Core/Src/stm32f4xx_it.c **** 
+ 208:Core/Src/stm32f4xx_it.c ****   /* USER CODE END EXTI2_IRQn 0 */
+ 209:Core/Src/stm32f4xx_it.c ****   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_2);
+ 234              		.loc 1 209 3 view .LVU30
+ 235 0002 0420     		movs	r0, #4
+ 236 0004 FFF7FEFF 		bl	HAL_GPIO_EXTI_IRQHandler
+ 237              	.LVL1:
+ 210:Core/Src/stm32f4xx_it.c ****   /* USER CODE BEGIN EXTI2_IRQn 1 */
+ 211:Core/Src/stm32f4xx_it.c **** 
+ 212:Core/Src/stm32f4xx_it.c ****   /* USER CODE END EXTI2_IRQn 1 */
+ 213:Core/Src/stm32f4xx_it.c **** }
+ 238              		.loc 1 213 1 is_stmt 0 view .LVU31
+ 239 0008 08BD     		pop	{r3, pc}
+ 240              		.cfi_endproc
+ 241              	.LFE229:
+ 243              		.text
+ 244              	.Letext0:
+ 245              		.file 2 "/home/dorijan/.config/Code/User/globalStorage/bmd.stm32-for-vscode/@xpack-dev-tools/arm-n
+ 246              		.file 3 "/home/dorijan/.config/Code/User/globalStorage/bmd.stm32-for-vscode/@xpack-dev-tools/arm-n
+ 247              		.file 4 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_gpio.h"
+ 248              		.file 5 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h"
+ARM GAS  /tmp/ccjAV5Hr.s 			page 9
 
 
 DEFINED SYMBOLS
                             *ABS*:00000000 stm32f4xx_it.c
-     /tmp/cctJL2Zx.s:21     .text.NMI_Handler:00000000 $t
-     /tmp/cctJL2Zx.s:27     .text.NMI_Handler:00000000 NMI_Handler
-     /tmp/cctJL2Zx.s:44     .text.HardFault_Handler:00000000 $t
-     /tmp/cctJL2Zx.s:50     .text.HardFault_Handler:00000000 HardFault_Handler
-     /tmp/cctJL2Zx.s:67     .text.MemManage_Handler:00000000 $t
-     /tmp/cctJL2Zx.s:73     .text.MemManage_Handler:00000000 MemManage_Handler
-     /tmp/cctJL2Zx.s:90     .text.BusFault_Handler:00000000 $t
-     /tmp/cctJL2Zx.s:96     .text.BusFault_Handler:00000000 BusFault_Handler
-     /tmp/cctJL2Zx.s:113    .text.UsageFault_Handler:00000000 $t
-     /tmp/cctJL2Zx.s:119    .text.UsageFault_Handler:00000000 UsageFault_Handler
-     /tmp/cctJL2Zx.s:136    .text.SVC_Handler:00000000 $t
-     /tmp/cctJL2Zx.s:142    .text.SVC_Handler:00000000 SVC_Handler
-     /tmp/cctJL2Zx.s:155    .text.DebugMon_Handler:00000000 $t
-     /tmp/cctJL2Zx.s:161    .text.DebugMon_Handler:00000000 DebugMon_Handler
-     /tmp/cctJL2Zx.s:174    .text.PendSV_Handler:00000000 $t
-     /tmp/cctJL2Zx.s:180    .text.PendSV_Handler:00000000 PendSV_Handler
-     /tmp/cctJL2Zx.s:193    .text.SysTick_Handler:00000000 $t
-     /tmp/cctJL2Zx.s:199    .text.SysTick_Handler:00000000 SysTick_Handler
+     /tmp/ccjAV5Hr.s:21     .text.NMI_Handler:00000000 $t
+     /tmp/ccjAV5Hr.s:27     .text.NMI_Handler:00000000 NMI_Handler
+     /tmp/ccjAV5Hr.s:44     .text.HardFault_Handler:00000000 $t
+     /tmp/ccjAV5Hr.s:50     .text.HardFault_Handler:00000000 HardFault_Handler
+     /tmp/ccjAV5Hr.s:67     .text.MemManage_Handler:00000000 $t
+     /tmp/ccjAV5Hr.s:73     .text.MemManage_Handler:00000000 MemManage_Handler
+     /tmp/ccjAV5Hr.s:90     .text.BusFault_Handler:00000000 $t
+     /tmp/ccjAV5Hr.s:96     .text.BusFault_Handler:00000000 BusFault_Handler
+     /tmp/ccjAV5Hr.s:113    .text.UsageFault_Handler:00000000 $t
+     /tmp/ccjAV5Hr.s:119    .text.UsageFault_Handler:00000000 UsageFault_Handler
+     /tmp/ccjAV5Hr.s:136    .text.SVC_Handler:00000000 $t
+     /tmp/ccjAV5Hr.s:142    .text.SVC_Handler:00000000 SVC_Handler
+     /tmp/ccjAV5Hr.s:155    .text.DebugMon_Handler:00000000 $t
+     /tmp/ccjAV5Hr.s:161    .text.DebugMon_Handler:00000000 DebugMon_Handler
+     /tmp/ccjAV5Hr.s:174    .text.PendSV_Handler:00000000 $t
+     /tmp/ccjAV5Hr.s:180    .text.PendSV_Handler:00000000 PendSV_Handler
+     /tmp/ccjAV5Hr.s:193    .text.SysTick_Handler:00000000 $t
+     /tmp/ccjAV5Hr.s:199    .text.SysTick_Handler:00000000 SysTick_Handler
+     /tmp/ccjAV5Hr.s:218    .text.EXTI2_IRQHandler:00000000 $t
+     /tmp/ccjAV5Hr.s:224    .text.EXTI2_IRQHandler:00000000 EXTI2_IRQHandler
 
 UNDEFINED SYMBOLS
 HAL_IncTick
+HAL_GPIO_EXTI_IRQHandler

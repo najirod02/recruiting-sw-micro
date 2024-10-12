@@ -61,6 +61,16 @@ static void MX_ADC1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+  //in case the handler is for multiple pins
+  if(GPIO_Pin == GPIO_PIN_2){
+    char buffer[40];
+    uint16_t digitalValue = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
+    sprintf(buffer, "Digital value: %hu\r\n", digitalValue);
+    HAL_UART_Transmit(&huart2, (uint8_t *) buffer, strlen(buffer), HAL_MAX_DELAY);
+  }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -95,7 +105,9 @@ int main(void)
   MX_USART2_UART_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
+
   //blink before entering while loop
+  //just to verify if the init has been executed
   HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
   HAL_Delay(500);
   HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
@@ -106,27 +118,25 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint16_t analogVal = 0, digitalVal = 0;
+  uint16_t analogVal = 0;
   char buffer[100];
 
+  /*TODO:
+    try generate new code with interrupt handler of analog pin
+  */
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    //read both analog and digital values
+    //read both analog values and user button
     HAL_ADC_Start(&hadc1);
     HAL_ADC_PollForConversion(&hadc1, 20);
     analogVal = HAL_ADC_GetValue(&hadc1);
-    digitalVal = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
-    sprintf(buffer, "Analog val: %hu\r\t\tDigital val: %hu\n", analogVal, digitalVal);
+    //user_btn = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
+    sprintf(buffer, "Analog val: %hu\r\n", analogVal);
     HAL_Delay(100); 
-
-    //write on serial the values fetched
-    if(HAL_UART_Transmit(&huart2, (uint8_t *) buffer, strlen(buffer), HAL_MAX_DELAY) == HAL_OK){
-      //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-      //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-    }
+    HAL_UART_Transmit(&huart2, (uint8_t *) buffer, strlen(buffer), HAL_MAX_DELAY);
   }
   /* USER CODE END 3 */
 }
@@ -290,7 +300,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : PC2 */
   GPIO_InitStruct.Pin = GPIO_PIN_2;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
@@ -300,6 +310,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
