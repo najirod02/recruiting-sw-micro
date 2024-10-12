@@ -27,12 +27,19 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef enum {
+    RAW,
+    MOVING_AVERAGE,
+    RANDOM_NOISE
+} FilterMode;
 
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define ADC_BUFFER_SIZE 1
+#define MOVING_AVG_SIZE 150
+#define BUFFER_SIZE 50
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -47,10 +54,21 @@ DMA_HandleTypeDef hdma_adc1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-uint16_t analogValue = 0;
-uint32_t adcBuffer[ADC_BUFFER_SIZE];
+uint16_t lastAnalogValue = 0, 
+         lastDigitalValue = 0;
 
-char buffer[40];
+uint32_t adcBuffer[ADC_BUFFER_SIZE];//dma data structure
+
+//var for moving average 
+uint16_t adc_moving_average[MOVING_AVG_SIZE];
+uint16_t buffer_index = 0;
+uint32_t sum = 0;
+
+FilterMode currentFilterMode = RAW;
+
+volatile uint8_t cli_index = 0;
+char cli_command[BUFFER_SIZE];
+char msg_buffer[BUFFER_SIZE];//buffer for serial msg
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -66,18 +84,85 @@ static void MX_ADC1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+/*
+this function will handle the interrupt whenever a new digital value is read
+*/
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
-  uint16_t digitalValue = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
-  sprintf(buffer, "Digital value: %hu\r\n", digitalValue);
-  HAL_UART_Transmit(&huart2, (uint8_t *) buffer, strlen(buffer), HAL_MAX_DELAY);
+  if(GPIO_Pin == GPIO_PIN_2){
+    lastDigitalValue = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
+    //sprintf(msg_buffer, "D: %hu\r\n", lastDigitalValue);
+    //HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+  }
+  else if(GPIO_Pin == GPIO_PIN_13){
+    //testing user button
+    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+  }
 }
 
+/*
+this function will handle the interrupt whenever a new analog value is read
+*/
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
-  if (hadc->Instance == ADC1) {
-    uint32_t analogValue = adcBuffer[0];
-    sprintf(buffer, "Analog val: %lu\r\n", analogValue);
-    HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
+    if (hadc->Instance == ADC1) {
+        lastAnalogValue = adcBuffer[0];
+        //sprintf(msg_buffer, "A: %hu\r\n", lastAnalogValue);
+        //HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+        // Update moving average if in that mode
+        if (currentFilterMode == MOVING_AVERAGE) {
+            sum -= adc_moving_average[buffer_index];
+            adc_moving_average[buffer_index] = lastAnalogValue;
+            sum += lastAnalogValue;
+            buffer_index = (buffer_index + 1) % MOVING_AVG_SIZE;
+        }
+    }
+}
+
+
+/*
+based on the input, change the filter mode
+*/
+void handle_cli_command() {
+    if (strcmp(cli_command, "raw") == 0) {
+        currentFilterMode = RAW;
+    } else if (strcmp(cli_command, "moving average") == 0) {
+        currentFilterMode = MOVING_AVERAGE;
+    } else if (strcmp(cli_command, "random noise") == 0) {
+        currentFilterMode = RANDOM_NOISE;
+    } else {
+        sprintf(cli_command, "Unknown command\r\n");
+    }
+
+    HAL_UART_Transmit(&huart2, (uint8_t *)cli_command, strlen(cli_command), HAL_MAX_DELAY);
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  /*
+  TODO: at the moment, when we receive a byte the led changes status
+  */
+  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+  
+  
+  /*
+  // Controlla se il buffer è pieno
+  if (cli_index < BUFFER_SIZE - 1) { // Lascia spazio per il terminatore
+      // Se il carattere ricevuto è un terminatore di riga
+      if (cli_command[cli_index] == '\n' || cli_command[cli_index] == '\r') {
+          cli_command[cli_index] = '\0'; // Termina la stringa
+          handle_cli_command(); // Elabora il comando
+          cli_index = 0; // Resetta l'indice per il prossimo comando
+      } else {
+          cli_command[cli_index+1] = '\0'; // Null-terminate the string
+          cli_index++; // Incrementa l'indice
+      }
+  } else {
+      // Se il buffer è pieno, resetta l'indice
+      cli_index = 0; // Resetta per evitare overflow
   }
+  */
+  
+  HAL_UART_Receive_IT(&huart2, &cli_command[cli_index], 1);
+
 }
 
 /* USER CODE END 0 */
@@ -129,7 +214,7 @@ int main(void)
   
   // Initialize the DMA conversion
   HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
-
+  HAL_UART_Receive_IT(&huart2, (uint8_t *)cli_command, 1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -140,6 +225,31 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    //print the latest values fetched
+    //sprintf(msg_buffer, "A: %hu\t\tD: %hu\t\tMA: %f\r\n", lastAnalogValue, lastDigitalValue, sum/(float)MOVING_AVG_SIZE);
+    //HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
+    //sprintf(msg_buffer, "A: %hu\t\tr\n", lastAnalogValue);
+    //HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
+
+    // Check if a command has been received
+    /*
+    // Prepare the output based on the current filter mode
+    switch (currentFilterMode) {
+        case RAW:
+            sprintf(msg_buffer, "A: %hu\t\tD: %hu\r\n", lastAnalogValue, lastDigitalValue);
+            break;
+        case MOVING_AVERAGE:
+            sprintf(msg_buffer, "MA: %f\t\tD: %hu\r\n", (float)sum / MOVING_AVG_SIZE, lastDigitalValue);
+            break;
+        case RANDOM_NOISE:
+            uint16_t noisyValue = lastAnalogValue + (rand() % 10); // Example: add random noise
+            sprintf(msg_buffer, "A: %hu (noisy)\t\tD: %hu\r\n", noisyValue, lastDigitalValue);
+            break;
+    }
+
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+    HAL_Delay(1000); // Adjust delay as needed
+    */
 
   }
   /* USER CODE END 3 */
@@ -334,6 +444,9 @@ static void MX_GPIO_Init(void)
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */

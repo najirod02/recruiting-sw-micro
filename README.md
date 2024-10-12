@@ -17,3 +17,8 @@ There are 2 possible solutions:
 to obtain the correct .ld file.
 
 - Use Makefile as toolchain and then manually add 'RAM' where needed.
+
+## Notes for myself
+
+At the moment, the DMA will store just one value before triggering the interrupt.<br/>
+The last 150 elements will be saved in a local buffer and used whenever the user want to print the moving average.
