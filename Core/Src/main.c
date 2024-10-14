@@ -37,7 +37,7 @@ typedef enum {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define ADC_BUFFER_SIZE 1
+#define ADC_BUFFER_SIZE 300
 #define MOVING_AVG_SIZE 150
 #define BUFFER_SIZE 50
 /* USER CODE END PD */
@@ -58,6 +58,7 @@ uint16_t lastAnalogValue = 0,
          lastDigitalValue = 0;
 
 uint32_t adcBuffer[ADC_BUFFER_SIZE];//dma data structure
+uint8_t convDone = 0;
 
 //var for moving average 
 uint16_t adc_moving_average[MOVING_AVG_SIZE];
@@ -90,8 +91,8 @@ this function will handle the interrupt whenever a new digital value is read
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
   if(GPIO_Pin == GPIO_PIN_2){
     lastDigitalValue = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
-    //sprintf(msg_buffer, "D: %hu\r\n", lastDigitalValue);
-    //HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+    sprintf(msg_buffer, "D: %hu\r\n", lastDigitalValue);
+    HAL_UART_Transmit_IT(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
   }
   else if(GPIO_Pin == GPIO_PIN_13){
     //testing user button
@@ -99,24 +100,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
   }
 }
 
-/*
-this function will handle the interrupt whenever a new analog value is read
-*/
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
-    if (hadc->Instance == ADC1) {
-        lastAnalogValue = adcBuffer[0];
-        //sprintf(msg_buffer, "A: %hu\r\n", lastAnalogValue);
-        //HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
-        // Update moving average if in that mode
-        if (currentFilterMode == MOVING_AVERAGE) {
-            sum -= adc_moving_average[buffer_index];
-            adc_moving_average[buffer_index] = lastAnalogValue;
-            sum += lastAnalogValue;
-            buffer_index = (buffer_index + 1) % MOVING_AVG_SIZE;
-        }
-    }
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc){
+  convDone = 1;
 }
-
 
 /*
 based on the input, change the filter mode
@@ -161,7 +147,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   }
   */
   
-  HAL_UART_Receive_IT(&huart2, &cli_command[cli_index], 1);
+  HAL_UART_Receive_IT(&huart2, (uint8_t *)cli_command[cli_index], 1);
 
 }
 
@@ -201,24 +187,15 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
 
-  //blink before entering while loop
-  //just to verify if the init has been executed
-  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-  HAL_Delay(500);
-  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-  HAL_Delay(500);
-  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-  HAL_Delay(500);
-  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-  HAL_Delay(500);
-  
   // Initialize the DMA conversion
   HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
-  HAL_UART_Receive_IT(&huart2, (uint8_t *)cli_command, 1);
+  //HAL_UART_Receive_IT(&huart2, (uint8_t *)cli_command, 1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  //sprintf(msg_buffer, "Ciao ciao");
+  //HAL_UART_Transmit_IT(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
 
   while (1)
   {
@@ -226,8 +203,28 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     //print the latest values fetched
-    //sprintf(msg_buffer, "A: %hu\t\tD: %hu\t\tMA: %f\r\n", lastAnalogValue, lastDigitalValue, sum/(float)MOVING_AVG_SIZE);
-    //HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
+    /*
+    if(isSent){
+      isSent = 0;
+      sprintf(msg_buffer, "A: %hu\t\tD: %hu\r\n", lastAnalogValue, lastDigitalValue);
+      HAL_UART_Transmit_IT(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
+    }*/
+
+    if(convDone){
+      sprintf(msg_buffer, "A:%hu\r\n", adcBuffer[0]);
+      HAL_UART_Transmit_IT(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
+      // Update moving average if in that mode
+      if (currentFilterMode == MOVING_AVERAGE) {
+          sum -= adc_moving_average[buffer_index];
+          adc_moving_average[buffer_index] = lastAnalogValue;
+          sum += lastAnalogValue;
+          buffer_index = (buffer_index + 1) % MOVING_AVG_SIZE;
+      }
+      convDone = 0;
+    }
+
+    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+    HAL_Delay(500);
     //sprintf(msg_buffer, "A: %hu\t\tr\n", lastAnalogValue);
     //HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
 
