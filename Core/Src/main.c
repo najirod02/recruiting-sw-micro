@@ -23,6 +23,8 @@
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
+#include <time.h> //for random values
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,6 +42,7 @@ typedef enum {
 #define ADC_BUFFER_SIZE 300
 #define MOVING_AVG_SIZE 150
 #define BUFFER_SIZE 50
+#define RANDOM_RANGE 300
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -54,22 +57,29 @@ DMA_HandleTypeDef hdma_adc1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-uint16_t lastAnalogValue = 0, 
-         lastDigitalValue = 0;
+
+//digital and analog variables
+uint16_t lastAnalogValue = 0; 
+uint16_t lastDigitalValue = 0;
 
 uint32_t adcBuffer[ADC_BUFFER_SIZE];//dma data structure
-uint8_t convDone = 0;
+uint8_t disableInterrupt = 0;
 
-//var for moving average 
+
+//moving average variables
 uint16_t adc_moving_average[MOVING_AVG_SIZE];
 uint16_t buffer_index = 0;
 uint32_t sum = 0;
 
-FilterMode currentFilterMode = RAW;
 
-volatile uint8_t cli_index = 0;
+//filter mode for data variables
+FilterMode currentFilterMode = RAW;
 char cli_command[BUFFER_SIZE];
+
+
+//debug/info variables
 char msg_buffer[BUFFER_SIZE];//buffer for serial msg
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -87,22 +97,32 @@ static void MX_ADC1_Init(void);
 
 /*
 this function will handle the interrupt whenever a new digital value is read
+or the user button is pressed
 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
   if(GPIO_Pin == GPIO_PIN_2){
     lastDigitalValue = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
-    sprintf(msg_buffer, "D: %hu\r\n", lastDigitalValue);
-    HAL_UART_Transmit_IT(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
   }
   else if(GPIO_Pin == GPIO_PIN_13){
-    //testing user button
-    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+    //Toggle sending of analog and digital value over serial
+    disableInterrupt = !disableInterrupt;
+
+    //activate/deactivate interrupt for dma and set led pin
+    if(disableInterrupt){
+      HAL_ADC_Stop_DMA(&hadc1);
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+    }else{
+      HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+    }
+
   }
 }
 
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc){
-  convDone = 1;
+/*
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc){
 }
+*/
 
 /*
 based on the input, change the filter mode
@@ -115,40 +135,21 @@ void handle_cli_command() {
     } else if (strcmp(cli_command, "random noise") == 0) {
         currentFilterMode = RANDOM_NOISE;
     } else {
-        sprintf(cli_command, "Unknown command\r\n");
+        //do nothing, comand not recognized
     }
-
-    HAL_UART_Transmit(&huart2, (uint8_t *)cli_command, strlen(cli_command), HAL_MAX_DELAY);
+    //clear buffer
+    memset(cli_command, '\0', sizeof(cli_command)); 
 }
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+/**
+ * callback function to handle the receiving of a comand from the user
+ */
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-  /*
-  TODO: at the moment, when we receive a byte the led changes status
-  */
-  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-  
-  
-  /*
-  // Controlla se il buffer è pieno
-  if (cli_index < BUFFER_SIZE - 1) { // Lascia spazio per il terminatore
-      // Se il carattere ricevuto è un terminatore di riga
-      if (cli_command[cli_index] == '\n' || cli_command[cli_index] == '\r') {
-          cli_command[cli_index] = '\0'; // Termina la stringa
-          handle_cli_command(); // Elabora il comando
-          cli_index = 0; // Resetta l'indice per il prossimo comando
-      } else {
-          cli_command[cli_index+1] = '\0'; // Null-terminate the string
-          cli_index++; // Incrementa l'indice
-      }
-  } else {
-      // Se il buffer è pieno, resetta l'indice
-      cli_index = 0; // Resetta per evitare overflow
-  }
-  */
-  
-  HAL_UART_Receive_IT(&huart2, (uint8_t *)cli_command[cli_index], 1);
-
+  handle_cli_command();
+  sprintf(msg_buffer, "New filter mode: %d\r\n", currentFilterMode);
+  HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+  HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
 }
 
 /* USER CODE END 0 */
@@ -161,7 +162,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  srand(time(NULL)); //set seed for random number generator
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -189,64 +190,54 @@ int main(void)
 
   // Initialize the DMA conversion
   HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
-  //HAL_UART_Receive_IT(&huart2, (uint8_t *)cli_command, 1);
+  HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  //sprintf(msg_buffer, "Ciao ciao");
-  //HAL_UART_Transmit_IT(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
 
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    //print the latest values fetched
-    /*
-    if(isSent){
-      isSent = 0;
-      sprintf(msg_buffer, "A: %hu\t\tD: %hu\r\n", lastAnalogValue, lastDigitalValue);
-      HAL_UART_Transmit_IT(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
-    }*/
-
-    if(convDone){
-      sprintf(msg_buffer, "A:%hu\r\n", adcBuffer[0]);
-      HAL_UART_Transmit_IT(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
-      // Update moving average if in that mode
+    if(!disableInterrupt){
+      lastAnalogValue = adcBuffer[0];
+      // Update moving average if in MOVING_AVERAGE mode
       if (currentFilterMode == MOVING_AVERAGE) {
-          sum -= adc_moving_average[buffer_index];
-          adc_moving_average[buffer_index] = lastAnalogValue;
-          sum += lastAnalogValue;
-          buffer_index = (buffer_index + 1) % MOVING_AVG_SIZE;
+        sum -= adc_moving_average[buffer_index];
+        adc_moving_average[buffer_index] = lastAnalogValue;
+        sum += lastAnalogValue;
+        buffer_index = (buffer_index + 1) % MOVING_AVG_SIZE;
       }
-      convDone = 0;
+
+      //print analog data
+      switch (currentFilterMode)
+      {
+      case RAW:
+        sprintf(msg_buffer, "A:%hu\r\n", (u_int16_t)lastAnalogValue);
+        break;
+      
+      case MOVING_AVERAGE:
+        float moving_avg = (float)sum / MOVING_AVG_SIZE;
+        sprintf(msg_buffer, "A: %.3f\r\n", moving_avg);
+        break;
+
+      case RANDOM_NOISE:
+        sprintf(msg_buffer, "A: %hu\r\n", (u_int16_t)(adcBuffer[0] + rand() % RANDOM_RANGE));
+        break;
+
+      default:
+        break;
+      }
+      HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+
+      //print digital data
+      sprintf(msg_buffer, "D: %hu\r\n", lastDigitalValue);
+      HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
     }
 
-    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-    HAL_Delay(500);
-    //sprintf(msg_buffer, "A: %hu\t\tr\n", lastAnalogValue);
-    //HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer));
-
-    // Check if a command has been received
-    /*
-    // Prepare the output based on the current filter mode
-    switch (currentFilterMode) {
-        case RAW:
-            sprintf(msg_buffer, "A: %hu\t\tD: %hu\r\n", lastAnalogValue, lastDigitalValue);
-            break;
-        case MOVING_AVERAGE:
-            sprintf(msg_buffer, "MA: %f\t\tD: %hu\r\n", (float)sum / MOVING_AVG_SIZE, lastDigitalValue);
-            break;
-        case RANDOM_NOISE:
-            uint16_t noisyValue = lastAnalogValue + (rand() % 10); // Example: add random noise
-            sprintf(msg_buffer, "A: %hu (noisy)\t\tD: %hu\r\n", noisyValue, lastDigitalValue);
-            break;
-    }
-
-    HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
-    HAL_Delay(1000); // Adjust delay as needed
-    */
 
   }
   /* USER CODE END 3 */
