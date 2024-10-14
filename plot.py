@@ -40,6 +40,12 @@ def read_serial(ser):
                         digital_values.append(digital_value)
                     except ValueError:
                         continue
+                elif line.startswith("C:"):
+                    # Command input indication
+                    print("Waiting for filter mode\nraw\tmoving average\trandom noise\n")
+                    user_input = input()
+                    ser.write((user_input).encode('utf-8'))
+
         except Exception as e:
             if not running:
                 break  # just exit as the port is closed
@@ -67,6 +73,7 @@ try:
             ax1.set_title('Analog Values')
             ax1.set_xlabel('Time')
             ax1.set_ylabel('Analog Value')
+            ax2.set_ylim([-1, 5000])
             ax1.legend()
             ax1.grid()
 

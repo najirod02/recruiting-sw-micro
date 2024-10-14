@@ -72,10 +72,14 @@ uint16_t buffer_index = 0;
 uint32_t sum = 0;
 
 
+//millis for warning state
+uint32_t lastTimer = 0;
+uint8_t isWarningState = 0;
+
 //filter mode for data variables
 FilterMode currentFilterMode = RAW;
 char cli_command[BUFFER_SIZE];
-
+u_int8_t sendRequest = 0;
 
 //debug/info variables
 char msg_buffer[BUFFER_SIZE];//buffer for serial msg
@@ -109,9 +113,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
     //activate/deactivate interrupt for dma and set led pin
     if(disableInterrupt){
+      //deactivate
+      sendRequest = 0;
       HAL_ADC_Stop_DMA(&hadc1);
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+
     }else{
+      //activate
+      sendRequest = 1;
       HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
     }
@@ -126,8 +135,10 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc){
 
 /*
 based on the input, change the filter mode
+if the comand is unknown, the current filter mode is not changed but
+a false value is returned
 */
-void handle_cli_command() {
+u_int8_t handle_cli_command() {
     if (strcmp(cli_command, "raw") == 0) {
         currentFilterMode = RAW;
     } else if (strcmp(cli_command, "moving average") == 0) {
@@ -135,20 +146,37 @@ void handle_cli_command() {
     } else if (strcmp(cli_command, "random noise") == 0) {
         currentFilterMode = RANDOM_NOISE;
     } else {
-        //do nothing, comand not recognized
+        //comand not recognized
+        memset(cli_command, '\0', sizeof(cli_command)); 
+        return 1;
     }
     //clear buffer
     memset(cli_command, '\0', sizeof(cli_command)); 
+    return 0;
 }
 
 /**
  * callback function to handle the receiving of a comand from the user
+ * if the command is unknown, restart anyway
  */
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-  handle_cli_command();
-  sprintf(msg_buffer, "New filter mode: %d\r\n", currentFilterMode);
-  HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+  uint8_t unknownComand = handle_cli_command();
+
+  if(unknownComand){
+    sprintf(msg_buffer, "Command not valid. Try again.\r\n");
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+    sprintf(msg_buffer, "C:\r\n");//send comand request to user
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);  
+  }
+  else{
+    sprintf(msg_buffer, "New filter mode: %d\r\n", currentFilterMode);
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+    sendRequest = 1;
+    disableInterrupt = 0;
+    HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
+  }
+
   HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
 }
 
@@ -191,7 +219,7 @@ int main(void)
   // Initialize the DMA conversion
   HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
   HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
-
+  lastTimer = HAL_GetTick();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -236,6 +264,30 @@ int main(void)
       //print digital data
       sprintf(msg_buffer, "D: %hu\r\n", lastDigitalValue);
       HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+      
+      if(lastDigitalValue){
+        //check if is high for 5 seconds
+        if(HAL_GetTick() - lastTimer >= 5000){
+          //warning state
+          isWarningState = 1;
+        }
+      }else{
+        //reset timer
+        lastTimer = HAL_GetTick();
+        isWarningState = 0;
+      }
+      
+    } else {
+      if(!sendRequest){
+        sprintf(msg_buffer, "C:\r\n");//send comand request to user
+        HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+        sendRequest = 1;
+      }
+    }
+
+    if(isWarningState){
+      sprintf(msg_buffer, "WARNING STATE!\r\n");
+      HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY); 
     }
 
 
