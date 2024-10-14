@@ -6,6 +6,14 @@ Repository for the microcontroller recruiting task of the Eagle team.
 
 For the board pinout, check this [link](https://os.mbed.com/platforms/ST-Nucleo-F411RE/)
 
+## Plotting with python
+Just run the script plot.py to plot the data and read the stream.<br/>
+
+You must install:
+- matplotlib
+- numpy
+
+
 ## Linker file - syntax error
 
 Using the STM32CubeMX software it is possible to setup the linker file.<br/>
