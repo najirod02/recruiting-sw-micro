@@ -62,6 +62,7 @@ UART_HandleTypeDef huart2;
 uint16_t lastAnalogValue = 0; 
 uint16_t lastDigitalValue = 0;
 
+uint16_t last_index = 0;//position of last written element on buffer
 uint32_t adcBuffer[ADC_BUFFER_SIZE];//dma data structure
 uint8_t disableInterrupt = 0;
 
@@ -79,7 +80,7 @@ uint8_t isWarningState = 0;
 //filter mode for data variables
 FilterMode currentFilterMode = RAW;
 char cli_command[BUFFER_SIZE];
-u_int8_t sendRequest = 0;
+uint8_t sendRequest = 0;
 
 //debug/info variables
 char msg_buffer[BUFFER_SIZE];//buffer for serial msg
@@ -99,16 +100,14 @@ static void MX_ADC1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-/*
-this function will handle the interrupt whenever a new digital value is read
-or the user button is pressed
-*/
+/**
+ * Callback function for gpio digital input
+ */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
   if(GPIO_Pin == GPIO_PIN_2){
     lastDigitalValue = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
   }
   else if(GPIO_Pin == GPIO_PIN_13){
-    //Toggle sending of analog and digital value over serial
     disableInterrupt = !disableInterrupt;
 
     //activate/deactivate interrupt for dma and set led pin
@@ -116,13 +115,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
       //deactivate
       sendRequest = 0;
       HAL_ADC_Stop_DMA(&hadc1);
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 
     }else{
       //activate
       sendRequest = 1;
       HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
     }
 
   }
@@ -133,10 +130,10 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc){
 }
 */
 
-/*
-based on the input, change the filter mode
-if the comand is unknown, the current filter mode is not changed but
-a false value is returned
+/**
+Based on the user input, change the filter mode.
+If the comand is unknown, the current filter is not changed but
+a falsse value is returned
 */
 u_int8_t handle_cli_command() {
     if (strcmp(cli_command, "raw") == 0) {
@@ -156,8 +153,8 @@ u_int8_t handle_cli_command() {
 }
 
 /**
- * callback function to handle the receiving of a comand from the user
- * if the command is unknown, restart anyway
+ * Callback function to handle the receiving of a comand from the user
+ * if the command is unknown, restart sending data anyway
  */
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
@@ -177,6 +174,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
   }
 
+  //wait for next input
   HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
 }
 
@@ -219,7 +217,7 @@ int main(void)
   // Initialize the DMA conversion
   HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
   HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
-  lastTimer = HAL_GetTick();
+  lastTimer = HAL_GetTick();//start time of MCU
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -231,8 +229,9 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     if(!disableInterrupt){
-      lastAnalogValue = adcBuffer[0];
-      // Update moving average if in MOVING_AVERAGE mode
+      last_index = (BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_adc1)) % BUFFER_SIZE;
+      lastAnalogValue = adcBuffer[last_index];
+      //update moving average if in MOVING_AVERAGE mode
       if (currentFilterMode == MOVING_AVERAGE) {
         sum -= adc_moving_average[buffer_index];
         adc_moving_average[buffer_index] = lastAnalogValue;
@@ -277,17 +276,16 @@ int main(void)
         isWarningState = 0;
       }
       
+      if(isWarningState){
+        sprintf(msg_buffer, "WARNING STATE!\r\n");
+        HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY); 
+      }
     } else {
       if(!sendRequest){
         sprintf(msg_buffer, "C:\r\n");//send comand request to user
         HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
         sendRequest = 1;
       }
-    }
-
-    if(isWarningState){
-      sprintf(msg_buffer, "WARNING STATE!\r\n");
-      HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY); 
     }
 
 
