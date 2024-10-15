@@ -68,7 +68,6 @@ uint16_t lastDigitalValue = 0;
 
 uint16_t last_index = 0;//position of last written element on buffer
 uint32_t adcBuffer[ADC_BUFFER_SIZE];//dma data structure
-uint8_t disableInterrupt = 0;
 
 //moving average variables
 uint16_t adc_moving_average[MOVING_AVG_SIZE];
@@ -110,19 +109,31 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
     lastDigitalValue = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
   }
   else if(GPIO_Pin == GPIO_PIN_13){
+    //FIXME: probably, need to debounce button to avoid multilpe firing
     if(current_state == STATE_WAIT_REQUEST || current_state == STATE_PAUSE){
       //change state to listening and restore dma
       current_state = next_state = STATE_LISTENING;
       HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_SET);
-      sendRequest = 0;
+      HAL_UART_AbortReceive_IT(&huart2);
+      lastTimer = HAL_GetTick();
     }else if(current_state == STATE_LISTENING){
       //change state to pause
       current_state = next_state = STATE_PAUSE;
+      //wait for next input
+      HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
+    }else if(current_state == STATE_WARNING){
+      //change state to wait request
+      current_state = next_state = STATE_WAIT_REQUEST;
+      //wait for next input
+      HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
     }else if(current_state == STATE_ERROR){
       //reset the board
       NVIC_SystemReset();
     }
+
+    sendRequest = 0;
+    lastTimer = HAL_GetTick();//reset timer
   }
 }
 
@@ -159,6 +170,14 @@ u_int8_t handle_cli_command() {
  */
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
+  //if we are not in pause or wait request state, ignore the comand received
+  //wait for next input
+  if(current_state!= STATE_PAUSE && current_state != STATE_WAIT_REQUEST){
+    memset(cli_command, '\0', sizeof(cli_command)); 
+    HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
+    return;
+  }
+
   uint8_t unknownComand = handle_cli_command();
 
   if(unknownComand){
@@ -166,17 +185,19 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
     sprintf(msg_buffer, "C:\r\n");//send comand request to user
     HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);  
+    HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
   }
   else{
     sprintf(msg_buffer, "New filter mode: %d\r\n", currentFilterMode);
     HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
     sendRequest = 1;
-    disableInterrupt = 0;
     HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
+    current_state = next_state = STATE_LISTENING;
+    lastTimer = HAL_GetTick();
   }
 
   //wait for next input
-  HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
+  //HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
 }
 
 /* USER CODE END 0 */
@@ -189,7 +210,6 @@ int main(void)
 {
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-
   while (1)
   {
     /* USER CODE END WHILE */
@@ -516,7 +536,6 @@ state_t do_error(state_data_t *data) {
   halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY); 
   //TODO: use a TIME peripheral to blink led
   HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_5);
-  HAL_Delay(200);
 
   return next_state;
 }
@@ -578,6 +597,7 @@ state_t do_listening(state_data_t *data) {
     if(HAL_GetTick() - lastTimer >= 5000){
       //warning state
       next_state = STATE_WARNING;
+      HAL_UART_AbortReceive_IT(&huart2);
     }
   }else{
     //reset timer
@@ -630,11 +650,9 @@ state_t do_pause(state_data_t *data) {
 
     //TODO: use a TIME peripheral to blink led
     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_5);
-    HAL_Delay(1000);
     sendRequest = 1;
   }
 
-  
   return next_state;
 }
 
