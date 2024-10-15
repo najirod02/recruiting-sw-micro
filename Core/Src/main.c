@@ -21,6 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "scheme.h"
 #include <string.h>
 #include <stdio.h>
 #include <time.h> //for random values
@@ -53,8 +54,11 @@ typedef enum {
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
-
 UART_HandleTypeDef huart2;
+HAL_StatusTypeDef halStatus;
+
+state_t current_state = STATE_INIT;
+state_t next_state = STATE_WAIT_REQUEST;
 
 /* USER CODE BEGIN PV */
 
@@ -66,12 +70,10 @@ uint16_t last_index = 0;//position of last written element on buffer
 uint32_t adcBuffer[ADC_BUFFER_SIZE];//dma data structure
 uint8_t disableInterrupt = 0;
 
-
 //moving average variables
 uint16_t adc_moving_average[MOVING_AVG_SIZE];
 uint16_t buffer_index = 0;
 uint32_t sum = 0;
-
 
 //millis for warning state
 uint32_t lastTimer = 0;
@@ -108,20 +110,19 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
     lastDigitalValue = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
   }
   else if(GPIO_Pin == GPIO_PIN_13){
-    disableInterrupt = !disableInterrupt;
-
-    //activate/deactivate interrupt for dma and set led pin
-    if(disableInterrupt){
-      //deactivate
-      sendRequest = 0;
-      HAL_ADC_Stop_DMA(&hadc1);
-
-    }else{
-      //activate
-      sendRequest = 1;
+    if(current_state == STATE_WAIT_REQUEST || current_state == STATE_PAUSE){
+      //change state to listening and restore dma
+      current_state = next_state = STATE_LISTENING;
       HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_SET);
+      sendRequest = 0;
+    }else if(current_state == STATE_LISTENING){
+      //change state to pause
+      current_state = next_state = STATE_PAUSE;
+    }else if(current_state == STATE_ERROR){
+      //reset the board
+      NVIC_SystemReset();
     }
-
   }
 }
 
@@ -186,40 +187,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
   */
 int main(void)
 {
-
-  /* USER CODE BEGIN 1 */
-  srand(time(NULL)); //set seed for random number generator
-  /* USER CODE END 1 */
-
-  /* MCU Configuration--------------------------------------------------------*/
-
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
-
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
-  /* Configure the system clock */
-  SystemClock_Config();
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_USART2_UART_Init();
-  MX_ADC1_Init();
-  /* USER CODE BEGIN 2 */
-
-  // Initialize the DMA conversion
-  HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
-  HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
-  lastTimer = HAL_GetTick();//start time of MCU
-  /* USER CODE END 2 */
-
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
@@ -228,67 +195,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    if(!disableInterrupt){
-      last_index = (BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_adc1)) % BUFFER_SIZE;
-      lastAnalogValue = adcBuffer[last_index];
-      //update moving average if in MOVING_AVERAGE mode
-      if (currentFilterMode == MOVING_AVERAGE) {
-        sum -= adc_moving_average[buffer_index];
-        adc_moving_average[buffer_index] = lastAnalogValue;
-        sum += lastAnalogValue;
-        buffer_index = (buffer_index + 1) % MOVING_AVG_SIZE;
-      }
-
-      //print analog data
-      switch (currentFilterMode)
-      {
-      case RAW:
-        sprintf(msg_buffer, "A:%hu\r\n", (u_int16_t)lastAnalogValue);
-        break;
-      
-      case MOVING_AVERAGE:
-        float moving_avg = (float)sum / MOVING_AVG_SIZE;
-        sprintf(msg_buffer, "A: %.3f\r\n", moving_avg);
-        break;
-
-      case RANDOM_NOISE:
-        sprintf(msg_buffer, "A: %hu\r\n", (u_int16_t)(adcBuffer[0] + rand() % RANDOM_RANGE));
-        break;
-
-      default:
-        break;
-      }
-      HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
-
-      //print digital data
-      sprintf(msg_buffer, "D: %hu\r\n", lastDigitalValue);
-      HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
-      
-      if(lastDigitalValue){
-        //check if is high for 5 seconds
-        if(HAL_GetTick() - lastTimer >= 5000){
-          //warning state
-          isWarningState = 1;
-        }
-      }else{
-        //reset timer
-        lastTimer = HAL_GetTick();
-        isWarningState = 0;
-      }
-      
-      if(isWarningState){
-        sprintf(msg_buffer, "WARNING STATE!\r\n");
-        HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY); 
-      }
-    } else {
-      if(!sendRequest){
-        sprintf(msg_buffer, "C:\r\n");//send comand request to user
-        HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
-        sendRequest = 1;
-      }
-    }
-
-
+    current_state = run_state(NULL);
   }
   /* USER CODE END 3 */
 }
@@ -492,6 +399,267 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+//debug/info variables
+char msg_buffer[BUFFER_SIZE];//buffer for serial msg
+
+// GLOBALS
+// State human-readable names
+const char *state_names[] = {"init", "wait_request", "error", "listening", "warning", "pause"};
+
+// List of state functions
+state_func_t *const state_table[NUM_STATES] = {
+  do_init,         // in state init
+  do_wait_request, // in state wait_request
+  do_error,        // in state error
+  do_listening,    // in state listening
+  do_warning,      // in state warning
+  do_pause,        // in state pause
+};
+
+// No transition functions
+
+/*  ____  _        _       
+ * / ___|| |_ __ _| |_ ___ 
+ * \___ \| __/ _` | __/ _ \
+ *  ___) | || (_| | ||  __/
+ * |____/ \__\__,_|\__\___|
+ *                         
+ *   __                  _   _                 
+ *  / _|_   _ _ __   ___| |_(_) ___  _ __  ___ 
+ * | |_| | | | '_ \ / __| __| |/ _ \| '_ \/ __|
+ * |  _| |_| | | | | (__| |_| | (_) | | | \__ \
+ * |_|  \__,_|_| |_|\___|\__|_|\___/|_| |_|___/
+ */                                             
+
+// Function to be executed in state init
+// valid return states: STATE_WAIT_REQUEST, STATE_ERROR
+state_t do_init(state_data_t *data) {
+  next_state = STATE_WAIT_REQUEST;
+  
+  //syslog(LOG_INFO, "[FSM] In state init");
+  /* Your Code Here */
+  srand(time(NULL)); //set seed for random number generator
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  halStatus = HAL_Init();
+
+  if(halStatus != HAL_OK){
+    next_state  = STATE_ERROR;
+    return next_state;
+  }
+
+  /* Configure the system clock */
+  SystemClock_Config();
+
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_DMA_Init();
+  MX_USART2_UART_Init();
+  MX_ADC1_Init();
+
+  // Initialize the DMA conversion
+  halStatus = HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
+  if(halStatus != HAL_OK){
+    next_state  = STATE_ERROR;
+    return next_state;
+  }
+
+  halStatus = HAL_UARTEx_ReceiveToIdle_IT(&huart2, (u_int8_t *)cli_command, BUFFER_SIZE);
+  if(halStatus != HAL_OK){
+    next_state  = STATE_ERROR;
+    return next_state;
+  }
+
+  lastTimer = HAL_GetTick();//start time of MCU
+  next_state = STATE_WAIT_REQUEST;
+
+  return next_state;
+}
+
+
+// Function to be executed in state wait_request
+// valid return states: STATE_ERROR, STATE_LISTENING
+state_t do_wait_request(state_data_t *data) {
+  next_state = NO_CHANGE;
+  
+  //syslog(LOG_INFO, "[FSM] In state wait_request");
+  /* Your Code Here */
+  if(!sendRequest){
+    halStatus = HAL_ADC_Stop_DMA(&hadc1);
+    if(halStatus != HAL_OK){
+      next_state  = STATE_ERROR;
+      return next_state;
+    }
+
+    sprintf(msg_buffer, "C:\r\n");//send comand request to user
+    halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+    if(halStatus != HAL_OK){
+      next_state  = STATE_ERROR;
+      return next_state;
+    }
+
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_RESET);
+    sendRequest = 1;
+  }
+  
+  return next_state;
+}
+
+
+// Function to be executed in state error
+// valid return states: NO_CHANGE
+state_t do_error(state_data_t *data) {
+  next_state = NO_CHANGE;
+  
+  //syslog(LOG_INFO, "[FSM] In state error");
+  /* Your Code Here */
+  sprintf(msg_buffer, "ERROR\r\n");
+  halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY); 
+  //TODO: use a TIME peripheral to blink led
+  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_5);
+  HAL_Delay(200);
+
+  return next_state;
+}
+
+
+// Function to be executed in state listening
+// valid return states: STATE_ERROR, STATE_WARNING, STATE_PAUSE
+state_t do_listening(state_data_t *data) {
+  next_state = NO_CHANGE;
+  
+  //syslog(LOG_INFO, "[FSM] In state listening");
+  /* Your Code Here */
+
+  last_index = (BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_adc1)) % BUFFER_SIZE;
+  lastAnalogValue = adcBuffer[last_index];
+  //update moving average if in MOVING_AVERAGE mode
+  if (currentFilterMode == MOVING_AVERAGE) {
+    sum -= adc_moving_average[buffer_index];
+    adc_moving_average[buffer_index] = lastAnalogValue;
+    sum += lastAnalogValue;
+    buffer_index = (buffer_index + 1) % MOVING_AVG_SIZE;
+  }
+
+  //print analog data
+  switch (currentFilterMode)
+  {
+  case RAW:
+    sprintf(msg_buffer, "A:%hu\r\n", (u_int16_t)lastAnalogValue);
+    break;
+  
+  case MOVING_AVERAGE:
+    float moving_avg = (float)sum / MOVING_AVG_SIZE;
+    sprintf(msg_buffer, "A: %.3f\r\n", moving_avg);
+    break;
+
+  case RANDOM_NOISE:
+    sprintf(msg_buffer, "A: %hu\r\n", (u_int16_t)(adcBuffer[0] + rand() % RANDOM_RANGE));
+    break;
+
+  default:
+    break;
+  }
+  halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+  if(halStatus != HAL_OK){
+    next_state  = STATE_ERROR;
+    return next_state;
+  }
+
+  //print digital data
+  sprintf(msg_buffer, "D: %hu\r\n", lastDigitalValue);
+  halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+  if(halStatus != HAL_OK){
+    next_state  = STATE_ERROR;
+    return next_state;
+  }
+
+  if(lastDigitalValue){
+    //check if is high for 5 seconds
+    if(HAL_GetTick() - lastTimer >= 5000){
+      //warning state
+      next_state = STATE_WARNING;
+    }
+  }else{
+    //reset timer
+    lastTimer = HAL_GetTick();
+  }
+
+  return next_state;
+}
+
+
+// Function to be executed in state warning
+// valid return states: STATE_WAIT_REQUEST, STATE_ERROR
+state_t do_warning(state_data_t *data) {
+  next_state = NO_CHANGE;
+  
+  //syslog(LOG_INFO, "[FSM] In state warning");
+  /* Your Code Here */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_RESET);
+  sprintf(msg_buffer, "WARNING\r\n");
+  halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY); 
+  if(halStatus != HAL_OK){
+    next_state = STATE_ERROR;
+    return next_state;
+  }
+
+  return next_state;
+}
+
+
+// Function to be executed in state pause
+// valid return states: STATE_ERROR, STATE_LISTENING
+state_t do_pause(state_data_t *data) {
+  next_state = NO_CHANGE;
+  
+  //syslog(LOG_INFO, "[FSM] In state pause");
+  /* Your Code Here */
+  if(!sendRequest){
+    halStatus = HAL_ADC_Stop_DMA(&hadc1);
+    if(halStatus != HAL_OK){
+      next_state  = STATE_ERROR;
+      return next_state;
+    }
+
+    sprintf(msg_buffer, "C:\r\n");//send comand request to user
+    halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
+    if(halStatus != HAL_OK){
+      next_state  = STATE_ERROR;
+      return next_state;
+    }
+
+    //TODO: use a TIME peripheral to blink led
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_5);
+    HAL_Delay(1000);
+    sendRequest = 1;
+  }
+
+  
+  return next_state;
+}
+
+
+
+/*  ____  _        _        
+ * / ___|| |_ __ _| |_ ___  
+ * \___ \| __/ _` | __/ _ \
+ *  ___) | || (_| | ||  __/ 
+ * |____/ \__\__,_|\__\___| 
+ *                          
+ *                                              
+ *  _ __ ___   __ _ _ __   __ _  __ _  ___ _ __ 
+ * | '_ ` _ \ / _` | '_ \ / _` |/ _` |/ _ \ '__|
+ * | | | | | | (_| | | | | (_| | (_| |  __/ |   
+ * |_| |_| |_|\__,_|_| |_|\__,_|\__, |\___|_|   
+ *                              |___/           
+ */
+
+state_t run_state(state_data_t *data) {
+  state_t new_state = state_table[current_state](data);
+  if (new_state == NO_CHANGE) new_state = current_state;
+  return new_state;
+};
+
 /* USER CODE END 4 */
 
 /**
@@ -502,6 +670,8 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  next_state = STATE_ERROR;
+  return
   __disable_irq();
   while (1)
   {
