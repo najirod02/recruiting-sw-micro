@@ -44,6 +44,7 @@ typedef enum {
 #define MOVING_AVG_SIZE 150
 #define BUFFER_SIZE 50
 #define RANDOM_RANGE 300
+#define DEBOUNCE_TIME_MS 50
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -76,7 +77,7 @@ uint32_t sum = 0;
 
 //millis for warning state
 uint32_t lastTimer = 0;
-uint8_t isWarningState = 0;
+uint32_t lastButtonPress = 0; //to avoid debouncing
 
 //filter mode for data variables
 FilterMode currentFilterMode = RAW;
@@ -109,12 +110,18 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
     lastDigitalValue = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
   }
   else if(GPIO_Pin == GPIO_PIN_13){
-    //FIXME: probably, need to debounce button to avoid multilpe firing
+    uint32_t currentTime = HAL_GetTick();
+
+    if (lastButtonPress != 0 && (currentTime - lastButtonPress) < DEBOUNCE_TIME_MS){
+      return;//ignore interupt
+    }
+    lastButtonPress = currentTime;
+
+    //FIXME: the led is not turned on and off correctly
     if(current_state == STATE_WAIT_REQUEST || current_state == STATE_PAUSE){
       //change state to listening and restore dma
       current_state = next_state = STATE_LISTENING;
-      HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
-      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
       HAL_UART_AbortReceive_IT(&huart2);
       lastTimer = HAL_GetTick();
     }else if(current_state == STATE_LISTENING){
@@ -125,6 +132,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
     }else if(current_state == STATE_WARNING){
       //change state to wait request
       current_state = next_state = STATE_WAIT_REQUEST;
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
       //wait for next input
       HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
     }else if(current_state == STATE_ERROR){
@@ -188,10 +196,10 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
   }
   else{
+    //FIXME: sometimes after inserting the comand, the printing doesn't resume
     sprintf(msg_buffer, "New filter mode: %d\r\n", currentFilterMode);
     HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
     sendRequest = 1;
-    HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
     current_state = next_state = STATE_LISTENING;
     lastTimer = HAL_GetTick();
   }
@@ -504,7 +512,6 @@ state_t do_wait_request(state_data_t *data) {
   //syslog(LOG_INFO, "[FSM] In state wait_request");
   /* Your Code Here */
   if(!sendRequest){
-    halStatus = HAL_ADC_Stop_DMA(&hadc1);
     if(halStatus != HAL_OK){
       next_state  = STATE_ERROR;
       return next_state;
@@ -517,7 +524,6 @@ state_t do_wait_request(state_data_t *data) {
       return next_state;
     }
 
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_RESET);
     sendRequest = 1;
   }
   
@@ -548,7 +554,6 @@ state_t do_listening(state_data_t *data) {
   
   //syslog(LOG_INFO, "[FSM] In state listening");
   /* Your Code Here */
-
   last_index = (BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_adc1)) % BUFFER_SIZE;
   lastAnalogValue = adcBuffer[last_index];
   //update moving average if in MOVING_AVERAGE mode
@@ -615,7 +620,7 @@ state_t do_warning(state_data_t *data) {
   
   //syslog(LOG_INFO, "[FSM] In state warning");
   /* Your Code Here */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
   sprintf(msg_buffer, "WARNING\r\n");
   halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY); 
   if(halStatus != HAL_OK){
@@ -635,7 +640,6 @@ state_t do_pause(state_data_t *data) {
   //syslog(LOG_INFO, "[FSM] In state pause");
   /* Your Code Here */
   if(!sendRequest){
-    halStatus = HAL_ADC_Stop_DMA(&hadc1);
     if(halStatus != HAL_OK){
       next_state  = STATE_ERROR;
       return next_state;

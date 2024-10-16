@@ -23,6 +23,7 @@ def signal_handler(sig, frame):
     running = False
     print("\nStopping data acquisition...")
     plt.close('all')
+    sys.exit(0)
 
 def read_serial(ser):
     global running, input_requested
@@ -30,13 +31,13 @@ def read_serial(ser):
         try:
             line = ser.readline().decode('utf-8').strip()
             if line:
-                print(line)
                 if input_requested and (line.startswith("A:") or line.startswith("D:")):
                     # cancel input request if transmission resumes
                     input_requested = False
                     print("Input cancelled due to resumed transmission.")
 
                 if line.startswith("A:"):
+                    print(line)
                     try:
                         analog_value = float(line.split(':')[1])
                         analog_values.append(analog_value)
@@ -44,6 +45,7 @@ def read_serial(ser):
                         continue
 
                 elif line.startswith("D:"):
+                    print(line)
                     try:
                         digital_value = int(line.split(':')[1])
                         digital_values.append(digital_value)
@@ -51,10 +53,12 @@ def read_serial(ser):
                         continue
                 
                 elif line.startswith("C:"):
+                    print("Insert filter mode (<raw> <moving average> <random noise>)")
                     if not input_requested:
                         input_requested = True
                         threading.Thread(target=request_user_input, args=(ser,)).start()
-
+                else:
+                    print(line)
         except Exception as e:
             if not running:
                 break
@@ -112,7 +116,7 @@ try:
     serial_thread.daemon = True
     serial_thread.start()
 
-    ani = animation.FuncAnimation(fig, update_plot, interval=100)
+    ani = animation.FuncAnimation(fig, update_plot, interval=100, cache_frame_data=False)
 
     # the plot should not steal the focus from other windows
     plt.show(block=True)
@@ -125,4 +129,3 @@ finally:
     running = False
     ser.close()
     print("Connection closed.")
-    sys.exit(0)
