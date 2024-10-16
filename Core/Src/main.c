@@ -55,14 +55,13 @@ typedef enum {
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
-UART_HandleTypeDef huart2;
-HAL_StatusTypeDef halStatus;
 
-state_t current_state = STATE_INIT;
-state_t next_state = STATE_WAIT_REQUEST;
+TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
+
+UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
 //digital and analog variables
 uint16_t lastAnalogValue = 0; 
 uint16_t lastDigitalValue = 0;
@@ -87,6 +86,12 @@ uint8_t sendRequest = 0;
 //debug/info variables
 char msg_buffer[BUFFER_SIZE];//buffer for serial msg
 
+//state variables
+HAL_StatusTypeDef halStatus = HAL_OK;
+state_t current_state = STATE_INIT;
+state_t next_state = STATE_WAIT_REQUEST;
+uint8_t is_running_error_timer = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -95,12 +100,27 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM3_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/**
+ * timers interrupt
+ */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim){
+  if(htim->Instance == TIM3){
+    //toggle pause state led
+    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+  } else if(htim->Instance == TIM4){
+    //toggle error state led
+    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+  }
+}
 
 /**
  * Callback function for gpio digital input
@@ -117,26 +137,33 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
     }
     lastButtonPress = currentTime;
 
-    //FIXME: the led is not turned on and off correctly
     if(current_state == STATE_WAIT_REQUEST || current_state == STATE_PAUSE){
       //change state to listening and restore dma
       current_state = next_state = STATE_LISTENING;
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
       HAL_UART_AbortReceive_IT(&huart2);
       lastTimer = HAL_GetTick();
+
+      //stop all timers
+      HAL_TIM_Base_Stop_IT(&htim3);
     }else if(current_state == STATE_LISTENING){
       //change state to pause
       current_state = next_state = STATE_PAUSE;
+      //start timer
+      HAL_TIM_Base_Start_IT(&htim3);
       //wait for next input
       HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
     }else if(current_state == STATE_WARNING){
       //change state to wait request
       current_state = next_state = STATE_WAIT_REQUEST;
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+      //stop all timers
+      HAL_TIM_Base_Stop_IT(&htim3);
       //wait for next input
       HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
     }else if(current_state == STATE_ERROR){
       //reset the board
+      is_running_error_timer = 0;
       NVIC_SystemReset();
     }
 
@@ -193,19 +220,19 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
     sprintf(msg_buffer, "C:\r\n");//send comand request to user
     HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);  
-    HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
   }
   else{
-    //FIXME: sometimes after inserting the comand, the printing doesn't resume
+    //FIXME: the led is not turned on and off correctly, probably some error with receiveing data
     sprintf(msg_buffer, "New filter mode: %d\r\n", currentFilterMode);
     HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
-    sendRequest = 1;
-    current_state = next_state = STATE_LISTENING;
-    lastTimer = HAL_GetTick();
+    sendRequest = 0;
+    //current_state = next_state = STATE_LISTENING;
+    //HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+    //lastTimer = HAL_GetTick();
   }
 
   //wait for next input
-  //HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
+  HAL_UARTEx_ReceiveToIdle_IT(&huart2, (uint8_t *)cli_command, BUFFER_SIZE);
 }
 
 /* USER CODE END 0 */
@@ -216,6 +243,26 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
   */
 int main(void)
 {
+
+  /* USER CODE BEGIN 1 */
+
+  /* USER CODE END 1 */
+
+  /* MCU Configuration--------------------------------------------------------*/
+
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
+
+  /* USER CODE BEGIN 2 */
+
+  /* USER CODE END 2 */
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -323,6 +370,96 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 9999;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 7199;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 9999;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 1679;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
 
 }
 
@@ -483,6 +620,8 @@ state_t do_init(state_data_t *data) {
   MX_DMA_Init();
   MX_USART2_UART_Init();
   MX_ADC1_Init();
+  MX_TIM3_Init();
+  MX_TIM4_Init();
 
   // Initialize the DMA conversion
   halStatus = HAL_ADC_Start_DMA(&hadc1, adcBuffer, ADC_BUFFER_SIZE);
@@ -499,7 +638,6 @@ state_t do_init(state_data_t *data) {
 
   lastTimer = HAL_GetTick();//start time of MCU
   next_state = STATE_WAIT_REQUEST;
-
   return next_state;
 }
 
@@ -538,10 +676,13 @@ state_t do_error(state_data_t *data) {
   
   //syslog(LOG_INFO, "[FSM] In state error");
   /* Your Code Here */
+  if(!is_running_error_timer){
+    HAL_TIM_Base_Start_IT(&htim4);
+    is_running_error_timer = 1;
+  }
+
   sprintf(msg_buffer, "ERROR\r\n");
   halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY); 
-  //TODO: use a TIME peripheral to blink led
-  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_5);
 
   return next_state;
 }
@@ -651,9 +792,6 @@ state_t do_pause(state_data_t *data) {
       next_state  = STATE_ERROR;
       return next_state;
     }
-
-    //TODO: use a TIME peripheral to blink led
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_5);
     sendRequest = 1;
   }
 
@@ -693,6 +831,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   next_state = STATE_ERROR;
+  HAL_TIM_Base_Start_IT(&htim4);
   return
   __disable_irq();
   while (1)
