@@ -17,6 +17,8 @@ input_requested = False
 first_request = False
 data_incoming = False  
 
+#TODO: implement audio generation based on analog value read
+
 '''
 handler for sigkill 
 '''
@@ -127,7 +129,7 @@ def update_plot(frame):
     #analog data
     ax1.plot(analog_values, label='Analog Signal', color='blue')
     ax1.set_title('Analog Values')
-    ax1.set_xlabel('Time')
+    ax1.set_xlabel('Time [ms]')
     ax1.set_ylabel('Analog Value')
     ax1.set_ylim([0, 5000])
     ax1.legend()
@@ -136,7 +138,7 @@ def update_plot(frame):
     #digital data
     ax2.plot(digital_values, label='Digital Signal', color='orange')
     ax2.set_title('Digital Values')
-    ax2.set_xlabel('Time')
+    ax2.set_xlabel('Time [ms]')
     ax2.set_ylabel('Digital Value')
     ax2.set_ylim([-1, 2])
     ax2.legend()
@@ -170,6 +172,9 @@ try:
     fig, (ax1, ax2) = plt.subplots(2, 1)
     ax1.set_title('Analog Values')
     ax2.set_title('Digital Values')
+    manager = plt.get_current_fig_manager()
+    manager.resize(1000, 900)
+
 
     serial_thread = threading.Thread(target=read_serial, args=(ser,))
     serial_thread.daemon = True

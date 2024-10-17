@@ -11,7 +11,8 @@ For the project, the sensor uses the following pins:
 - PC2 for digital read
 
 ## Plotting with python
-Just run the script __plot.py__ to plot the data and read the stream.<br/>
+First, connect your board to your device and then, just run
+the script __plot.py__ to plot the data and read the stream.<br/>
 
 You must install:
 - matplotlib
@@ -38,5 +39,7 @@ to obtain the correct .ld file.
 - Use __Makefile__ as __toolchain__ and then __manually add 'RAM'__ where needed.
 
 ### Notes for myself
-The user button may trigger more than one interrupt with a single interaction.<br/>
+- The user button may trigger more than one interrupt with a single interaction.<br/>
 The debouncing has been implemented but still, sometimes, the interrupt is fired more than one time.
+
+- Different audio libraries have been tested.

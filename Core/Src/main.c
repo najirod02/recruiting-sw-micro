@@ -24,7 +24,7 @@
 #include "scheme.h"
 #include <string.h>
 #include <stdio.h>
-#include <time.h> //for random values
+#include <time.h> //for random values generation
 #include <stdlib.h>
 /* USER CODE END Includes */
 
@@ -68,16 +68,16 @@ uint16_t lastAnalogValue = 0;
 uint16_t lastDigitalValue = 0;
 
 uint16_t last_index = 0;//position of last written element on buffer
-uint32_t adcBuffer[ADC_BUFFER_SIZE];//dma data structure
+uint32_t adcBuffer[ADC_BUFFER_SIZE];//data structure for dma
 
 //moving average variables
 uint16_t adc_moving_average[MOVING_AVG_SIZE];
-uint16_t buffer_index = 0;
+uint16_t buffer_index_moving_average = 0;
 uint32_t sum = 0;
 
 //millis for warning state
 uint32_t lastTimer = 0;
-uint32_t lastButtonPress = 0; //to avoid debouncing
+uint32_t lastButtonPress = 0;//to avoid debouncing
 
 //filter mode for data variables
 FilterMode currentFilterMode = RAW;
@@ -186,11 +186,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
     lastTimer = HAL_GetTick();//reset timer
   }
 }
-
-/*
-void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc){
-}
-*/
 
 /**
 Based on the user input, change the filter mode.
@@ -594,9 +589,7 @@ static void MX_GPIO_Init(void)
 state_t do_init(state_data_t *data) {
   next_state = STATE_WAIT_REQUEST;
   
-  //syslog(LOG_INFO, "[FSM] In state init");
-  /* Your Code Here */
-  srand(time(NULL)); //set seed for random number generator
+  srand(time(NULL));//set seed for random number generator
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   halStatus = HAL_Init();
 
@@ -623,13 +616,6 @@ state_t do_init(state_data_t *data) {
     return next_state;
   }
 
-  /*
-  halStatus = HAL_UARTEx_ReceiveToIdle_IT(&huart2, (u_int8_t *)cli_command, BUFFER_SIZE);
-  if(halStatus != HAL_OK){
-    next_state  = STATE_ERROR;
-    return next_state;
-  }*/
-
   lastTimer = HAL_GetTick();//start time of MCU
   next_state = STATE_WAIT_REQUEST;
   return next_state;
@@ -641,8 +627,6 @@ state_t do_init(state_data_t *data) {
 state_t do_wait_request(state_data_t *data) {
   next_state = NO_CHANGE;
   
-  //syslog(LOG_INFO, "[FSM] In state wait_request");
-  /* Your Code Here */
   if(!is_request_sended){
     sprintf(msg_buffer, "C:\r\n");//send comand request to user
     halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
@@ -664,8 +648,6 @@ state_t do_wait_request(state_data_t *data) {
 state_t do_error(state_data_t *data) {
   next_state = NO_CHANGE;
   
-  //syslog(LOG_INFO, "[FSM] In state error");
-  /* Your Code Here */
   if(!is_running_error_timer){
     HAL_TIM_Base_Start_IT(&htim4);
     is_running_error_timer = 1;
@@ -691,18 +673,15 @@ state_t do_error(state_data_t *data) {
 // valid return states: STATE_ERROR, STATE_WARNING, STATE_PAUSE
 state_t do_listening(state_data_t *data) {
   next_state = NO_CHANGE;
-  
-  //syslog(LOG_INFO, "[FSM] In state listening");
-  /* Your Code Here */
+
   last_index = (BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_adc1)) % BUFFER_SIZE;
   lastAnalogValue = adcBuffer[last_index];
-  //update moving average if in MOVING_AVERAGE mode
-  if (currentFilterMode == MOVING_AVERAGE) {
-    sum -= adc_moving_average[buffer_index];
-    adc_moving_average[buffer_index] = lastAnalogValue;
-    sum += lastAnalogValue;
-    buffer_index = (buffer_index + 1) % MOVING_AVG_SIZE;
-  }
+
+  //update moving average even if not in MOVING_AVERAGE mode
+  sum -= adc_moving_average[buffer_index_moving_average];
+  adc_moving_average[buffer_index_moving_average] = lastAnalogValue;
+  sum += lastAnalogValue;
+  buffer_index_moving_average = (buffer_index_moving_average + 1) % MOVING_AVG_SIZE;
 
   //print analog data
   switch (currentFilterMode)
@@ -723,6 +702,7 @@ state_t do_listening(state_data_t *data) {
   default:
     break;
   }
+
   halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
   if(halStatus != HAL_OK){
     next_state  = STATE_ERROR;
@@ -758,8 +738,6 @@ state_t do_listening(state_data_t *data) {
 state_t do_warning(state_data_t *data) {
   next_state = NO_CHANGE;
   
-  //syslog(LOG_INFO, "[FSM] In state warning");
-  /* Your Code Here */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
   sprintf(msg_buffer, "WARNING\r\n");
   halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY); 
@@ -777,8 +755,6 @@ state_t do_warning(state_data_t *data) {
 state_t do_pause(state_data_t *data) {
   next_state = NO_CHANGE;
   
-  //syslog(LOG_INFO, "[FSM] In state pause");
-  /* Your Code Here */
   if(!is_request_sended){
     sprintf(msg_buffer, "C:\r\n");//send comand request to user
     halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
