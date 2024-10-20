@@ -5,11 +5,15 @@ import signal
 import sys
 import time
 import threading
+import musicalbeeps
+import queue
 
 SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
 RETRY_DELAY = 1#seconds elapsed before trying to connect again
+PLAY_SOUNDS = True
 
+ser = None#serial connection handler
 analog_values = []
 digital_values = []
 running = True
@@ -17,14 +21,53 @@ input_requested = False
 first_request = False
 data_incoming = False  
 
-#TODO: implement audio generation based on analog value read
+#beep player
+player = musicalbeeps.Player(volume=0.3, mute_output=True)
+current_note = None#avoid playing the same note over and over again
+sound_queue = queue.Queue()
+
+'''
+the thread plays a specific beep sound based on the analog value read from
+the serial port
+'''
+def play_sound():
+    current_note = None
+
+    while running:
+        try:
+            note = sound_queue.get(timeout=1)
+            if note != current_note:
+                current_note = note
+                if note is not None:
+                    player.play_note(note, 0.1)#longer duration generates delays on serial reading
+        except queue.Empty:
+            continue
+
+'''
+map the analog values to a specific note
+'''
+def map_and_queue_sound(value):
+    if value < 1250:
+        sound_queue.put('C')
+    elif 1250 <= value < 2500:
+        sound_queue.put('D')
+    elif 2500 <= value < 3750:
+        sound_queue.put('E')
+    elif 3750 <= value < 5000:
+        sound_queue.put('F')
+    else:
+        sound_queue.put(None)
 
 '''
 handler for sigkill 
 '''
 def signal_handler(sig, frame):
-    global running
+    global running, ser
     running = False
+    if(ser):
+        ser.reset_output_buffer()
+        ser.reset_input_buffer()
+        ser.close()
     print("\nStopping data acquisition...")
     plt.close('all')
     sys.exit(0)
@@ -40,7 +83,6 @@ def read_serial(ser):
             if line:
                 data_incoming = True
                 if input_requested and (line.startswith("A:") or line.startswith("D:")):
-                    #in case we had an input request, abort it
                     input_requested = False
                     print("Input cancelled due to resumed transmission.")
 
@@ -49,6 +91,7 @@ def read_serial(ser):
                     try:
                         analog_value = float(line.split(':')[1])
                         analog_values.append(analog_value)
+                        if(PLAY_SOUNDS): map_and_queue_sound(analog_value)#play sound
                     except ValueError:
                         continue
 
@@ -61,20 +104,17 @@ def read_serial(ser):
                         continue
                 
                 elif line.startswith("C:"):
-                    print("Insert filter mode (<raw> <moving average> <random noise>)")
+                    print("Insert filter mode [raw] [moving average] [random noise]")
                     if not input_requested:
                         input_requested = True
                         first_request = True
                         threading.Thread(target=request_user_input, args=(ser,)).start()
                 else:
-                    #case for WARNING and ERROR state
                     input_requested = True
                     first_request = True
                     print(line)
             elif not first_request:
-                #useful in the case the connection has been established after the 
-                #mcu send the request comand on serial
-                print("Insert filter mode (<raw> <moving average> <random noise>)")
+                print("Insert filter mode [raw] [moving average] [random noise]")
                 if not input_requested:
                     input_requested = True
                     first_request = True
@@ -86,14 +126,35 @@ def read_serial(ser):
             print("Error reading serial data:", e)
 
 '''
-check if the command is a valid one
-otherwise, reject
+update the plots with new data (analog and digital)
 '''
-def handle_cli_command(cli_command):
-    if cli_command in ["raw", "moving average", "random noise"]:
-        return 1
-    #unknown comand
-    return 0
+def update_plot(frame):
+    ax1.clear()
+    ax2.clear()
+
+    # Analog data
+    ax1.plot(analog_values, label='Analog Signal', color='blue')
+    ax1.set_title('Analog Values')
+    ax1.set_xlabel('Time [ms]')
+    ax1.set_ylabel('Analog Value')
+    ax1.set_ylim([0, 5000])
+    ax1.legend()
+    ax1.grid()
+
+    # Digital data
+    ax2.plot(digital_values, label='Digital Signal', color='orange')
+    ax2.set_title('Digital Values')
+    ax2.set_xlabel('Time [ms]')
+    ax2.set_ylabel('Digital Value')
+    ax2.set_ylim([-0.5, 1.5])
+    ax2.legend()
+    ax2.grid()
+
+    # Limit the size of the data buffer to avoid memory issues
+    if len(analog_values) > 200:
+        analog_values.pop(0)
+    if len(digital_values) > 200:
+        digital_values.pop(0)
 
 '''
 thread to manage input requests to user
@@ -110,9 +171,6 @@ def request_user_input(ser):
                     ser.write((user_input).encode('utf-8'))
                 else:
                     print("Command not valid.")
-            else:
-                pass
-                #time.sleep(0.5)
             data_incoming = False
     except Exception as e:
         print(f"Error while getting user input: {e}")
@@ -120,49 +178,33 @@ def request_user_input(ser):
         input_requested = False
 
 '''
-update the plots with new data (analog and digital)
+check if the command is a valid one
+otherwise, reject
 '''
-def update_plot(frame):
-    ax1.clear()
-    ax2.clear()
-
-    #analog data
-    ax1.plot(analog_values, label='Analog Signal', color='blue')
-    ax1.set_title('Analog Values')
-    ax1.set_xlabel('Time [ms]')
-    ax1.set_ylabel('Analog Value')
-    ax1.set_ylim([0, 5000])
-    ax1.legend()
-    ax1.grid()
-
-    #digital data
-    ax2.plot(digital_values, label='Digital Signal', color='orange')
-    ax2.set_title('Digital Values')
-    ax2.set_xlabel('Time [ms]')
-    ax2.set_ylabel('Digital Value')
-    ax2.set_ylim([-1, 2])
-    ax2.legend()
-    ax2.grid()
-
-    #to avoid memory issues, remove some of the old data
-    if len(analog_values) > 200:
-        analog_values.pop(0)
-    if len(digital_values) > 200:
-        digital_values.pop(0)
+def handle_cli_command(cli_command):
+    if cli_command in ["raw", "moving average", "random noise"]:
+        return 1
+    # unknown command
+    return 0
 
 '''
 try connect to the serial port.
 if it is not possible, try again after RETRY_DELAY time
 '''
 def connect_serial():
+    global ser
+    signal.signal(signal.SIGINT, signal_handler)
     while True:
         try:
-            ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+            ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.05)
+            ser.reset_output_buffer()#clear residual data of buffer
+            ser.reset_input_buffer()
             print(f"Connected to {SERIAL_PORT}")
             return ser
         except serial.SerialException as e:
             print(f"Failed to connect to {SERIAL_PORT}, retrying in {RETRY_DELAY} seconds...")
             time.sleep(RETRY_DELAY)
+
 
 # init serial connection
 try:
@@ -172,17 +214,24 @@ try:
     fig, (ax1, ax2) = plt.subplots(2, 1)
     ax1.set_title('Analog Values')
     ax2.set_title('Digital Values')
+    plt.subplots_adjust(hspace=0.4) 
     manager = plt.get_current_fig_manager()
     manager.resize(1000, 900)
 
+    #thread for sounds
+    if(PLAY_SOUNDS):
+        sound_thread = threading.Thread(target=play_sound)
+        sound_thread.daemon = True
+        sound_thread.start()
 
+    #thread for serial reading
     serial_thread = threading.Thread(target=read_serial, args=(ser,))
     serial_thread.daemon = True
     serial_thread.start()
 
+    #'thread' for plotting data
     ani = animation.FuncAnimation(fig, update_plot, interval=100, cache_frame_data=False)
 
-    # the plot should not steal the focus from other windows
     plt.show(block=True)
 
 except Exception as e:
@@ -190,5 +239,6 @@ except Exception as e:
 
 finally:
     running = False
-    ser.close()
+    if ser and not ser.closed:
+        ser.close()
     print("Connection closed.")

@@ -189,8 +189,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
 /**
 Based on the user input, change the filter mode.
-If the comand is unknown, the current filter is not changed but
-a falsse value is returned
+If the command is unknown, the current filter is not changed but
+a false value is returned
 */
 u_int8_t handle_cli_command() {
     if (strcmp(cli_command, "raw") == 0) {
@@ -210,12 +210,11 @@ u_int8_t handle_cli_command() {
 }
 
 /**
- * Callback function to handle the receiving of a comand from the user
- * if the command is unknown, restart sending data anyway
+ * Callback function to handle the receiving of a command from the user
  */
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-  //if we are not in pause or wait request state, ignore the comand received
+  //if we are not in pause or wait request state, ignore the command received
   //wait for next input
   if(current_state!= STATE_PAUSE && current_state != STATE_WAIT_REQUEST){
     memset(cli_command, '\0', sizeof(cli_command)); 
@@ -628,7 +627,7 @@ state_t do_wait_request(state_data_t *data) {
   next_state = NO_CHANGE;
   
   if(!is_request_sended){
-    sprintf(msg_buffer, "C:\r\n");//send comand request to user
+    sprintf(msg_buffer, "C:\r\n");//send command request to user
     halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
     if(halStatus != HAL_OK){
       next_state  = STATE_ERROR;
@@ -678,6 +677,7 @@ state_t do_listening(state_data_t *data) {
   lastAnalogValue = adcBuffer[last_index];
 
   //update moving average even if not in MOVING_AVERAGE mode
+  //in order to have the data ready when requested (change of filter mode)
   sum -= adc_moving_average[buffer_index_moving_average];
   adc_moving_average[buffer_index_moving_average] = lastAnalogValue;
   sum += lastAnalogValue;
@@ -756,7 +756,7 @@ state_t do_pause(state_data_t *data) {
   next_state = NO_CHANGE;
   
   if(!is_request_sended){
-    sprintf(msg_buffer, "C:\r\n");//send comand request to user
+    sprintf(msg_buffer, "C:\r\n");//send command request to user
     halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
     if(halStatus != HAL_OK){
       next_state  = STATE_ERROR;
@@ -802,6 +802,9 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  /*
+  in case of a generic rror, set the next state as ERROR
+  */
   next_state = STATE_ERROR;
   HAL_TIM_Base_Start_IT(&htim4);
   HAL_UART_AbortReceive_IT(&huart2);
