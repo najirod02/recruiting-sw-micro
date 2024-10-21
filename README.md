@@ -10,6 +10,10 @@ For the project, the sensor uses the following pins:
 - PA0 for analog read
 - PC2 for digital read
 
+In __red__, the pins that have been used for the project.
+
+![alt text](./assets/pin_conf.jpg)
+
 ## Plotting with python
 First of all, you must install:
 
@@ -49,11 +53,6 @@ to obtain the correct .ld file.
 
 - Use __Makefile__ as __toolchain__ and then __manually add 'RAM'__ where needed.
 
-## Possible issues
-Here a list of issues that I have faced during the developing of this project:
-
-- The user button may trigger more than one interrupt with a single interaction.<br/>
-Although debouncing has been implemented, sometimes the interrupt is still fired more than once. The problem could be simply the button itself.
-
-- The sound is played only for a short time and not continuosly. Increasing the duration generates delays in the reading of the data from the serial port and also on in updating the the plot.<br/>
+## About the beep library
+The sound is played only for a short time and not continuosly. Increasing the duration generates delays in the reading of the data from the serial port and also in updating the the plot.<br/>
 Using a C library might improve the efficiency.

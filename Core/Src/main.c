@@ -46,6 +46,7 @@ typedef enum {
 #define CLI_BUFFER_SIZE 15
 #define RANDOM_RANGE 300
 #define DEBOUNCE_TIME_MS 50
+#define WARNING_TIMEOUT_MS 5000
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -104,6 +105,7 @@ state_func_t *const state_table[NUM_STATES] = {
 HAL_StatusTypeDef halStatus = HAL_OK;
 state_t current_state = STATE_INIT;
 state_t next_state = STATE_WAIT_REQUEST;
+state_t new_state = STATE_WAIT_REQUEST;
 uint8_t is_running_error_timer = 0;
 
 /* USER CODE END PV */
@@ -149,24 +151,37 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
     uint32_t currentTime = HAL_GetTick();
 
     //check for debouncing
-    if (lastButtonPress != 0 && (currentTime - lastButtonPress) < DEBOUNCE_TIME_MS){
+    if ((currentTime - lastButtonPress) < DEBOUNCE_TIME_MS){
       return;//ignore interupt
     }
     lastButtonPress = currentTime;
 
     if(current_state == STATE_WAIT_REQUEST || current_state == STATE_PAUSE){
-      //change state to listening and restore dma
-      current_state = next_state = STATE_LISTENING;
+      //change state to listening
+      current_state = next_state = new_state = STATE_LISTENING;
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-      HAL_UART_AbortReceive_IT(&huart2);
+      halStatus = HAL_UART_AbortReceive_IT(&huart2);//deactivate cli
+      if(halStatus != HAL_OK){
+        next_state = STATE_ERROR;
+        return;
+      }
       lastTimer = HAL_GetTick();
 
       //stop all timers
-      HAL_TIM_Base_Stop_IT(&htim3);
-      HAL_TIM_Base_Stop_IT(&htim4);
+      halStatus = HAL_TIM_Base_Stop_IT(&htim3);
+      if(halStatus != HAL_OK){
+        next_state = STATE_ERROR;
+        return;
+      }
+
+      halStatus = HAL_TIM_Base_Stop_IT(&htim4);
+      if(halStatus != HAL_OK){
+        next_state = STATE_ERROR;
+        return;
+      }
     }else if(current_state == STATE_LISTENING){
       //change state to pause
-      current_state = next_state = STATE_PAUSE;
+      current_state = next_state = new_state = STATE_PAUSE;
       //start timer
       HAL_TIM_Base_Start_IT(&htim3);
     }else if(current_state == STATE_WARNING){
@@ -174,15 +189,22 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
       current_state = next_state = STATE_WAIT_REQUEST;
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
       //stop all timers
-      HAL_TIM_Base_Stop_IT(&htim3);
-      HAL_TIM_Base_Stop_IT(&htim4);
+      halStatus = HAL_TIM_Base_Stop_IT(&htim3);
+      if(halStatus != HAL_OK){
+        next_state = STATE_ERROR;
+        return;
+      }
+      halStatus = HAL_TIM_Base_Stop_IT(&htim4);
+      if(halStatus != HAL_OK){
+        next_state = STATE_ERROR;
+        return;
+      }
     }else if(current_state == STATE_ERROR){
       //reset the board
       is_running_error_timer = 0;
       NVIC_SystemReset();
     }
 
-    is_request_sended = 0;
     lastTimer = HAL_GetTick();//reset timer
   }
 }
@@ -192,7 +214,7 @@ Based on the user input, change the filter mode.
 If the command is unknown, the current filter is not changed but
 a false value is returned
 */
-u_int8_t handle_cli_command() {
+u_int8_t handle_cli_command(){
     if (strcmp(cli_command, "raw") == 0) {
         currentFilterMode = RAW;
     } else if (strcmp(cli_command, "moving average") == 0) {
@@ -221,6 +243,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     return;
   }
 
+  //check if command is unknown or not
   uint8_t unknownComand = handle_cli_command();
 
   if(unknownComand){
@@ -587,6 +610,7 @@ static void MX_GPIO_Init(void)
 // valid return states: STATE_WAIT_REQUEST, STATE_ERROR
 state_t do_init(state_data_t *data) {
   next_state = STATE_WAIT_REQUEST;
+  is_request_sended = 0;
   
   srand(time(NULL));//set seed for random number generator
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
@@ -616,6 +640,7 @@ state_t do_init(state_data_t *data) {
   }
 
   lastTimer = HAL_GetTick();//start time of MCU
+
   next_state = STATE_WAIT_REQUEST;
   return next_state;
 }
@@ -624,8 +649,6 @@ state_t do_init(state_data_t *data) {
 // Function to be executed in state wait_request
 // valid return states: STATE_ERROR, STATE_LISTENING
 state_t do_wait_request(state_data_t *data) {
-  next_state = NO_CHANGE;
-  
   if(!is_request_sended){
     sprintf(msg_buffer, "C:\r\n");//send command request to user
     halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
@@ -633,9 +656,14 @@ state_t do_wait_request(state_data_t *data) {
       next_state  = STATE_ERROR;
       return next_state;
     }
-
-    halStatus = HAL_UARTEx_ReceiveToIdle_IT(&huart2, (u_int8_t *)cli_command, BUFFER_SIZE);
     is_request_sended = 1;
+
+    //wait for possible input from user
+    halStatus = HAL_UARTEx_ReceiveToIdle_IT(&huart2, (u_int8_t *)cli_command, BUFFER_SIZE);
+    if(halStatus != HAL_OK){
+      next_state = STATE_ERROR;
+      return next_state;
+    }
   }
   
   return next_state;
@@ -645,15 +673,18 @@ state_t do_wait_request(state_data_t *data) {
 // Function to be executed in state error
 // valid return states: NO_CHANGE
 state_t do_error(state_data_t *data) {
-  next_state = NO_CHANGE;
-  
   if(!is_running_error_timer){
     HAL_TIM_Base_Start_IT(&htim4);
     is_running_error_timer = 1;
   }
 
   if(is_request_sended){
-    HAL_UART_AbortReceive_IT(&huart2);
+    //deactivate cli
+    halStatus = HAL_UART_AbortReceive_IT(&huart2);
+    if(halStatus != HAL_OK){
+      next_state = STATE_ERROR;
+      return next_state;
+    }
   }
 
   //retrieve last errors raised
@@ -671,8 +702,9 @@ state_t do_error(state_data_t *data) {
 // Function to be executed in state listening
 // valid return states: STATE_ERROR, STATE_WARNING, STATE_PAUSE
 state_t do_listening(state_data_t *data) {
-  next_state = NO_CHANGE;
+  is_request_sended = 0;
 
+  //read latest analog value wrote on buffer
   last_index = (BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_adc1)) % BUFFER_SIZE;
   lastAnalogValue = adcBuffer[last_index];
 
@@ -718,11 +750,16 @@ state_t do_listening(state_data_t *data) {
   }
 
   if(lastDigitalValue){
-    //check if is high for 5 seconds
-    if(HAL_GetTick() - lastTimer >= 5000){
+    //check if digital is high for 5 seconds
+    if(HAL_GetTick() - lastTimer >= WARNING_TIMEOUT_MS){
       //warning state
       next_state = STATE_WARNING;
-      HAL_UART_AbortReceive_IT(&huart2);
+      //deactivate cli
+      halStatus = HAL_UART_AbortReceive_IT(&huart2);
+      if(halStatus != HAL_OK){
+        next_state = STATE_ERROR;
+        return next_state;
+      }
     }
   }else{
     //reset timer
@@ -736,7 +773,7 @@ state_t do_listening(state_data_t *data) {
 // Function to be executed in state warning
 // valid return states: STATE_WAIT_REQUEST, STATE_ERROR
 state_t do_warning(state_data_t *data) {
-  next_state = NO_CHANGE;
+  is_request_sended = 0;
   
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
   sprintf(msg_buffer, "WARNING\r\n");
@@ -753,8 +790,6 @@ state_t do_warning(state_data_t *data) {
 // Function to be executed in state pause
 // valid return states: STATE_ERROR, STATE_LISTENING
 state_t do_pause(state_data_t *data) {
-  next_state = NO_CHANGE;
-  
   if(!is_request_sended){
     sprintf(msg_buffer, "C:\r\n");//send command request to user
     halStatus = HAL_UART_Transmit(&huart2, (uint8_t *)msg_buffer, strlen(msg_buffer), HAL_MAX_DELAY);
@@ -762,9 +797,14 @@ state_t do_pause(state_data_t *data) {
       next_state  = STATE_ERROR;
       return next_state;
     }
-
-    halStatus = HAL_UARTEx_ReceiveToIdle_IT(&huart2, (u_int8_t *)cli_command, BUFFER_SIZE);
     is_request_sended = 1;
+
+    //wait for possible user input
+    halStatus = HAL_UARTEx_ReceiveToIdle_IT(&huart2, (u_int8_t *)cli_command, BUFFER_SIZE);
+    if(halStatus != HAL_OK){
+      next_state = STATE_ERROR;
+      return next_state;
+    }
   }
 
   return next_state;
@@ -787,8 +827,10 @@ state_t do_pause(state_data_t *data) {
  */
 
 state_t run_state(state_data_t *data) {
-  state_t new_state = state_table[current_state](data);
+  new_state = state_table[current_state](data);
   if (new_state == NO_CHANGE) new_state = current_state;
+  //force state in case of inconsistency due to interrupt
+  if(current_state == next_state) new_state = current_state;
   return new_state;
 };
 
@@ -803,7 +845,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   /*
-  in case of a generic rror, set the next state as ERROR
+  in case of a generic error, set the next state as ERROR
   */
   next_state = STATE_ERROR;
   HAL_TIM_Base_Start_IT(&htim4);
